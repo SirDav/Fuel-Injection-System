@@ -36,16 +36,24 @@ PROCESSING EQUATIONS:
 */
 
 // Libraries
-
 #include <LiquidCrystal.h>
+
+// Setup Variables
 const int rs = 7, en = 8, d4 = 9, d5 = 10, d6 = 11, d7 = 12;    //LCD interface pinout
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+int analog_temp = 0;                                            // A0 analog input for TEMP sensor
+
+// Global Variables
+int temp = 0;
+
+// Initialization
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
+
 
 // Setup Routine
 void setup() 
 {
-  Serial.begin(9600);   // Initialize Serial Port - 9600 baudrate.
-  lcd.begin(16, 2);     // set up the LCD's number of columns and rows:
+  Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
+  lcd.begin(16, 2);                                            // set up the LCD's number of columns and rows:
   lcd.print ("Initialized");
   Serial.println("Initializing...");
 }
@@ -53,4 +61,6 @@ void setup()
 // Main Routine
 void loop()
 {
+  temp = analogRead(analog_temp);                              // Read TEMP from A0 pin
+  Serial.println(temp);
 }
