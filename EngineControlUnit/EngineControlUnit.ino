@@ -1,6 +1,10 @@
 /*
 Fuel Injection System
 
+Author: 
+           * Damián Valderrama
+           * Alejandro Pinto
+
 INPUTS:
   - Intake Manifold Air Temperature
   - Intake Manifold Air Pressure
@@ -31,15 +35,22 @@ PROCESSING EQUATIONS:
       Rf: Injector rate
 */
 
+// Libraries
+
+#include <LiquidCrystal.h>
+const int rs = 7, en = 8, d4 = 9, d5 = 10, d6 = 11, d7 = 12;    //LCD interface pinout
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
 // Setup Routine
 void setup() 
 {
-  Serial.begin(9600);    // Initialize Serial Port - 9600 baudrate.
+  Serial.begin(9600);   // Initialize Serial Port - 9600 baudrate.
+  lcd.begin(16, 2);     // set up the LCD's number of columns and rows:
+  lcd.print ("Initialized");
+  Serial.println("Initializing...");
 }
 
 // Main Routine
 void loop()
 {
-Serial.println("Initializing...");
-delay(1000);     // espera 1 segundo
 }
