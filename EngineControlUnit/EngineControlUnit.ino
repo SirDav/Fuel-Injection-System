@@ -48,6 +48,7 @@ int N = 4;                                                      // Number of Cil
 int P = 1;                                                      // Default Atmospheric Pressure
 float R = 0.18;                                                      // Default Gasoline Molecular Weight
 int V = 1;                                                      // Default Air Mass Volume
+int Inj_output = 3;                                             // Output pin for Injector
 
 // Initialization
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
@@ -74,8 +75,10 @@ void setup()
 void loop()
 {
   temp = analogRead(analog_temp);                              // Read TEMP from A0 pin
-  float MAF=(float)A_calc(P, V, temp);                         // Calculate Air/Fuel Mixture (n)
+  float MAF=(float)A_calc(P, V, temp*5);                       // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
   lcd.clear();
   lcd.print(MAF,4);
   Serial.println(MAF,4);
+  analogWrite(Inj_output, temp/4);
+  delay(100); 
 }
