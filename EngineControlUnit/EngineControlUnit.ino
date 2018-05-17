@@ -47,6 +47,8 @@ const int ledPin =  13;                                         // the number of
 // Global Variables
 int lastButtonState = LOW;
 int buttonState;
+int display_refresh = 1000;                                      // Display Refresh Rate [ms]
+int refresh_counter = 0;
 unsigned long lastDebounceTime = 0;                             // Last Time the Key was Toggled
 unsigned long debounceDelay = 50;                               // Debounce Time; Increase if the Input Flickers
 int display_message = 0;                                        // Display Screen in use (Value to Print)
@@ -106,6 +108,19 @@ float A_calc (int P, int V, int T)
   return result;
 }
 
+ISR(TIMER1_OVF_vect) {
+  TCNT1 = 50000U;
+  if (refresh_counter < display_refresh)
+  {
+    refresh_counter ++;
+  }
+  else
+  { 
+    display_print();
+    refresh_counter = 0;
+  }
+}
+
 // Setup Routine
 void setup() 
 {
@@ -113,6 +128,14 @@ void setup()
   pinMode(ledPin, OUTPUT);
   Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
   lcd.begin(16, 2);                                            // Set up the LCD's number of columns and rows
+
+  TCCR1A = 0;           // you have to change the timer mode before changes
+  TCCR1B = 0;           // stop the timer
+  TIFR1 |= _BV(TOV1);   // clear the overflow interrupt flag by writing 1 to it
+  TCNT1  = 50000U;      // tick in around 1ms / this makes more sense if it's set correctly
+  TCCR1B = _BV(CS10);   // no prescaler ?????  REALLY???? this one is prescale by 8
+  TIMSK1 |= _BV(TOIE1); // enable timer overflow interrupt
+    
   lcd.print ("Initialized");
   Serial.println("Initializing...");
 }
@@ -122,7 +145,6 @@ void loop()
 {
   temp = analogRead(analog_temp);                              // Read TEMP from A0 pin
   MAF=(float)A_calc(P, V, temp*5);                             // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
-  display_print();
   //analogWrite(Inj_output, temp/4);
   int reading = digitalRead(buttonPin);
   if (reading != lastButtonState) {
