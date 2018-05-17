@@ -159,6 +159,5 @@ void loop()
     }
   }
   lastButtonState = reading;
-  delay(100); 
 }
 
