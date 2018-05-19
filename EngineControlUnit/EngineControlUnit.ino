@@ -9,10 +9,10 @@ INPUTS:
   - Intake Manifold Air Temperature
   - Intake Manifold Air Pressure
   - Engine RPM
-  - Camshaft Position
+  
 OUTPUTS:
   - ti: Injector Duty Time
-  - RPM Messure
+  - RPM Measure
 
 PROCESSING EQUATIONS:
   - Gas Equation:
@@ -23,13 +23,13 @@ PROCESSING EQUATIONS:
       R: Gas Constant [J / (mol·K)] 
       T: Intake Manifold Air Temperature [K]
   - Air/Fuel Mixture (A = n):
-    A = MAF/(RPM*N/2)
+    A = MAF/((RPM/60)*N/2)
       N: #Cilinders
       MAF: n (Quantity of Gas [moles])
       RPM: Revolutions per Minute (Engine)
   - Fuel per Cilinder:
-    F = A / (A/F)*d
-      d: 
+    F = A / AFR
+      AFR: air-fuel ration
   - Injector Duty Time:
     ti = F / Rf
       Rf: Injector rate
@@ -37,6 +37,28 @@ PROCESSING EQUATIONS:
 
 // Libraries
 #include <LiquidCrystal.h>
+#include <TimerOne.h>
+
+// Defines
+#define ADC_RESOL      10                                   // ADC resolution (number of bits of ADC) 
+#define TEMP_RANGE     90                                   // Intake manifold air temperature range
+#define TEMP_MIN      240                                   // Minimum intake manifold air temperature [°K]
+#define TEMP_MAX      330                                   // Maximum intake manifold air temperatura [°K]
+#define WAITING 0
+#define INUSE 1
+
+//VE Matrix
+float VE_Matrix[9][18] = {
+  {7.3, 55.0, 55.0, 57.0, 63.5, 67.0,  66.0, 74.0, 71.5, 75.7, 77.5, 75.5, 75.5, 75.5, 73.0, 72.0, 72.0, 72.0 },
+  {9.2, 55.0, 55.0, 59.0, 65.0, 69.0,  68.0, 76.0, 73.5, 78.0, 79.5, 78.0, 78.0, 78.0, 75.5, 74.0, 74.0, 74.0 },
+  {11.0, 55.0, 55.0, 62.5, 68.5, 73.5,  72.0, 80.0, 78.0, 82.0, 84.0, 82.0, 82.0, 82.0, 79.5, 78.5, 78.5, 78.5 },
+  {12.9, 55.0, 56.5, 64.5, 71.5, 76.0,  74.5, 83.0, 80.5, 85.5, 87.5, 85.5, 85.5, 85.5, 82.5, 81.0, 81.0, 81.0 },
+  {14.7, 57.5, 59.5, 68.0, 75.0, 80.0,  78.5, 88.0, 85.0, 90.0, 92.0, 90.0, 90.0, 90.0, 87.0, 85.5, 85.5, 85.5 },
+  {16.5, 57.5, 59.5, 68.0, 75.0, 80.0,  78.5, 88.0, 85.0, 90.0, 92.0, 90.0, 90.0, 90.0, 87.0, 85.5, 85.5, 85.5 },
+  {18.4, 59.0, 61.5, 69.5, 77.0, 82.0,  80.5, 90.0, 87.0, 92.5, 94.0, 92.5, 92.5, 92.5, 89.5, 88.0, 88.0, 88.0 },
+  {20.2, 59.0, 61.5, 69.5, 77.0, 82.0,  80.5, 90.0, 87.0, 92.5, 94.0, 92.5, 92.5, 92.5, 89.5, 88.0, 88.0, 88.0 },
+  {22.0, 59.0, 61.5, 69.5, 77.0, 82.0,  80.5, 90.0, 87.0, 92.5, 94.0, 92.5, 92.5, 92.5, 89.5, 88.0, 88.0, 88.0 }
+};
 
 // Setup Variables
 const int rs = 7, en = 8, d4 = 9, d5 = 10, d6 = 11, d7 = 12;    //LCD interface pinout
@@ -47,18 +69,27 @@ const int ledPin =  13;                                         // the number of
 // Global Variables
 int lastButtonState = LOW;
 int buttonState;
-int display_refresh = 1000;                                      // Display Refresh Rate [ms]
-int refresh_counter = 0;
+unsigned display_refresh = 30000;                               // Display Refresh Rate [us]
+unsigned refresh_counter = 0;
 unsigned long lastDebounceTime = 0;                             // Last Time the Key was Toggled
 unsigned long debounceDelay = 50;                               // Debounce Time; Increase if the Input Flickers
 int display_message = 0;                                        // Display Screen in use (Value to Print)
-int temp = 273;                                                 // Default Temperature: 273K = 0C
+float temp = 300.00;                                            // Default Temperature: 300°K = 26.85°C
 int N = 4;                                                      // Number of Cilinders
-int P = 1;                                                      // Default Atmospheric Pressure
-float R = 0.18;                                                      // Default Gasoline Molecular Weight
-int V = 1;                                                      // Default Air Mass Volume
+float P = 1.0;                                                  // Default Atmospheric Pressure [atm]
+float R = 0.000082057;                                          // Default Gasoline Molecular Weight [(m^3*atm)/(°K*mol)
+float V = 1.00;                                                 // Default Air Mass Volume [m^3]
 float MAF = 0;
+int A = 0;
+int RPM = 0;                                               
 int Inj_output = 3;                                             // Output pin for Injector
+int Rf = 4;                                                      // Injector rate
+float AFR = 14.7;                                               // Stoichiometric air-fuel ratio. 
+float engineDispl = 2.0;                                        // Default engine displacement [l]
+unsigned int motorRPM = 0;                                      // Default motor speed [RPM]
+
+
+int inj_status=WAITING;
 
 // Initialization
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
@@ -101,15 +132,14 @@ void display_print()
   }
   
 }
-float A_calc (int P, int V, int T)
+float A_calc (float P, float V, float T)
 {
   float result;
   result = ((P * V) / (R * T));
   return result;
 }
 
-ISR(TIMER1_OVF_vect) {
-  TCNT1 = 50000U;
+void callback(void) {
   if (refresh_counter < display_refresh)
   {
     refresh_counter ++;
@@ -121,6 +151,25 @@ ISR(TIMER1_OVF_vect) {
   }
 }
 
+void out_serial(float value)
+{
+  Serial.print(value);
+}
+
+float getVEfromLookupTable (unsigned int motorRPM, float P)   
+{
+  motorRPM=motorRPM/500+1;                                    // Matrix column calculation
+  int pre_value = 0;
+  for(int i = 0; i < 9; i++)
+  { 
+    if ( (P*14.7) >= VE_Matrix[i][0] )                        // [atm] to [PSI] conversion included (14.7PSI=1atm)
+    {
+      pre_value=i;
+    }
+  }
+  return VE_Matrix[pre_value][motorRPM];
+}
+
 // Setup Routine
 void setup() 
 {
@@ -128,14 +177,8 @@ void setup()
   pinMode(ledPin, OUTPUT);
   Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
   lcd.begin(16, 2);                                            // Set up the LCD's number of columns and rows
-
-  TCCR1A = 0;           // you have to change the timer mode before changes
-  TCCR1B = 0;           // stop the timer
-  TIFR1 |= _BV(TOV1);   // clear the overflow interrupt flag by writing 1 to it
-  TCNT1  = 50000U;      // tick in around 1ms / this makes more sense if it's set correctly
-  TCCR1B = _BV(CS10);   // no prescaler ?????  REALLY???? this one is prescale by 8
-  TIMSK1 |= _BV(TOIE1); // enable timer overflow interrupt
-    
+  Timer1.initialize(15);                                       // initialize timer1, 15us
+  Timer1.attachInterrupt(callback);                            // attaches callback() as a timer overflow interrupt
   lcd.print ("Initialized");
   Serial.println("Initializing...");
 }
@@ -143,8 +186,14 @@ void setup()
 // Main Routine
 void loop()
 {
-  temp = analogRead(analog_temp);                              // Read TEMP from A0 pin
-  MAF=(float)A_calc(P, V, temp*5);                             // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
+  float temp_counts = analogRead(analog_temp);                  // Read TEMP counts from A0 pin
+  temp = (float) (((temp_counts/1023)*TEMP_RANGE)+TEMP_MIN);     // Converts ADC counts into temperature [ºK]
+  Serial.println(temp);
+
+  float volEfficiency = getVEfromLookupTable(motorRPM, P);      // Gets VE depending on motor speed and pressure
+  V = engineDispl*volEfficiency;
+  
+  MAF=(float)A_calc(P, V, temp);                                // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
   //analogWrite(Inj_output, temp/4);
   int reading = digitalRead(buttonPin);
   if (reading != lastButtonState) {
@@ -159,5 +208,13 @@ void loop()
     }
   }
   lastButtonState = reading;
+  RPM = 3000;
+  float A = MAF/(((RPM/60)*N)/2);                                    // Air/Fuel Mixture
+  //Serial.println(String("Air/Fuel Mixture: ")+String(A,10));
+  int d = 124;   //??????????????????
+  float F = A / (A/2)*d;     // ??????????????/                                       // Fuel Per Cilinder
+  //Serial.println(String("Fuel Per Cilinder: ")+String(F,10));
+  int ti = F / Rf;                                            //Injector Duty Time:
+  //Serial.println(String("Injector Duty Time: ")+String(ti,10));     
 }
 
