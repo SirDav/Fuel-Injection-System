@@ -81,9 +81,9 @@ float R = 0.000082057;                                          // Default Gasol
 float V = 1.00;                                                 // Default Air Mass Volume [m^3]
 float MAF = 0;
 int A = 0;
-int RPM = 0;                                               
+int RPM = 1000;                                               
 int Inj_output = 3;                                             // Output pin for Injector
-int Rf = 4;                                                      // Injector rate
+float Rf = 2.5;                                                   // Injector rate [g/s]
 float AFR = 14.7;                                               // Stoichiometric air-fuel ratio. 
 float engineDispl = 2.0;                                        // Default engine displacement [l]
 unsigned int motorRPM = 0;                                      // Default motor speed [RPM]
@@ -119,7 +119,8 @@ void display_print()
       lcd.setCursor(0, 0);
       lcd.print ("Temperature");
       lcd.setCursor(0, 1);
-      lcd.print(String((temp-273))+String(" C"));
+      //lcd.print(String((temp-273))+String(" C"));
+      lcd.print(String((temp))+String(" K"));
       break;
     case 2:
       lcd.setCursor(0, 0);
@@ -156,6 +157,22 @@ void out_serial(float value)
   Serial.print(value);
 }
 
+void read_button(int reading)
+{
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+  if ((millis() - lastDebounceTime) > debounceDelay) {          // Check if key was pressed longer than DebounceTime to remove flickers
+    if (reading != buttonState) {
+      buttonState = reading;
+      if (buttonState == HIGH) {
+        display_rotate();
+      }
+    }
+  }
+  lastButtonState = reading;
+}
+
 float getVEfromLookupTable (unsigned int motorRPM, float P)   
 {
   motorRPM=motorRPM/500+1;                                    // Matrix column calculation
@@ -167,7 +184,7 @@ float getVEfromLookupTable (unsigned int motorRPM, float P)
       pre_value=i;
     }
   }
-  return VE_Matrix[pre_value][motorRPM];
+  return VE_Matrix[pre_value][motorRPM]/100;
 }
 
 // Setup Routine
@@ -186,35 +203,21 @@ void setup()
 // Main Routine
 void loop()
 {
+  read_button(digitalRead(buttonPin));
+
   float temp_counts = analogRead(analog_temp);                  // Read TEMP counts from A0 pin
   temp = (float) (((temp_counts/1023)*TEMP_RANGE)+TEMP_MIN);     // Converts ADC counts into temperature [ºK]
-  Serial.println(temp);
 
   float volEfficiency = getVEfromLookupTable(motorRPM, P);      // Gets VE depending on motor speed and pressure
-  V = engineDispl*volEfficiency;
+  V = engineDispl*volEfficiency/1000;
   
   MAF=(float)A_calc(P, V, temp);                                // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
-  //analogWrite(Inj_output, temp/4);
-  int reading = digitalRead(buttonPin);
-  if (reading != lastButtonState) {
-    lastDebounceTime = millis();
-  }
-  if ((millis() - lastDebounceTime) > debounceDelay) {          // Check if key was pressed longer than DebounceTime to remove flickers
-    if (reading != buttonState) {
-      buttonState = reading;
-      if (buttonState == HIGH) {
-        display_rotate();
-      }
-    }
-  }
-  lastButtonState = reading;
-  RPM = 3000;
-  float A = MAF/(((RPM/60)*N)/2);                                    // Air/Fuel Mixture
+  float A = (MAF*28.966)/((RPM/60)*(N/2));                      // Air/Fuel Mixture
   //Serial.println(String("Air/Fuel Mixture: ")+String(A,10));
-  int d = 124;   //??????????????????
-  float F = A / (A/2)*d;     // ??????????????/                                       // Fuel Per Cilinder
+  float F = A / AFR;                                             // Fuel Per Cilinder
   //Serial.println(String("Fuel Per Cilinder: ")+String(F,10));
-  int ti = F / Rf;                                            //Injector Duty Time:
+  float ti = F / Rf;                                             //Injector Duty Time
+  Serial.println(ti,4);
   //Serial.println(String("Injector Duty Time: ")+String(ti,10));     
 }
 
