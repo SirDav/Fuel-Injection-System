@@ -44,8 +44,12 @@ PROCESSING EQUATIONS:
 #define TEMP_RANGE     90                                   // Intake manifold air temperature range
 #define TEMP_MIN      240                                   // Minimum intake manifold air temperature [°K]
 #define TEMP_MAX      330                                   // Maximum intake manifold air temperatura [°K]
-#define WAITING 0
+#define WAIT 0
+#define MAINTAIN 1
+#define SENSE 2
 #define INUSE 1
+#define TRUE 1
+#define FALSE 0
 
 //VE Matrix
 float VE_Matrix[9][18] = {
@@ -65,11 +69,13 @@ const int rs = 7, en = 8, d4 = 9, d5 = 10, d6 = 11, d7 = 12;    //LCD interface 
 int analog_temp = 0;                                            // A0 analog input for TEMP sensor
 const int buttonPin = 2;                                        // External button for menu
 const int ledPin =  13;                                         // the number of the LED pin
+const int Inj_output = 3;                                             // Output pin for Injector
 
 // Global Variables
 int lastButtonState = LOW;
+int STATE = LOW;
 int buttonState;
-unsigned display_refresh = 30000;                               // Display Refresh Rate [us]
+unsigned display_refresh = 65000;                               // Display Refresh Rate [us]
 unsigned refresh_counter = 0;
 unsigned long lastDebounceTime = 0;                             // Last Time the Key was Toggled
 unsigned long debounceDelay = 50;                               // Debounce Time; Increase if the Input Flickers
@@ -82,14 +88,15 @@ float V = 1.00;                                                 // Default Air M
 float MAF = 0;
 int A = 0;
 int RPM = 1000;                                               
-int Inj_output = 3;                                             // Output pin for Injector
 float Rf = 2.5;                                                   // Injector rate [g/s]
 float AFR = 14.7;                                               // Stoichiometric air-fuel ratio. 
 float engineDispl = 2.0;                                        // Default engine displacement [l]
+float ti = 0;
+float timer = 0;
 unsigned int motorRPM = 0;                                      // Default motor speed [RPM]
-
-
-int inj_status=WAITING;
+int inj_status=WAIT;
+int STATUS = 0;
+int inj_maintain = FALSE;
 
 // Initialization
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
@@ -98,11 +105,10 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
 
 void display_rotate(void)
 {
-  if (display_message < 2)
+  if (display_message < 3)
     {display_message++;}
   else
     {display_message = 0;}
-  Serial.println (display_message);
 }
 
 void display_print()
@@ -113,21 +119,27 @@ void display_print()
       lcd.setCursor(0, 0);
       lcd.print ("MAF");
       lcd.setCursor(0, 1);
-      lcd.print(MAF,4);
+      lcd.print(String(MAF,4)+String (" moles"));
       break;
     case 1:
       lcd.setCursor(0, 0);
       lcd.print ("Temperature");
       lcd.setCursor(0, 1);
-      //lcd.print(String((temp-273))+String(" C"));
+      //lcd.print(String((temp-273),2)+String(" C"));
       lcd.print(String((temp))+String(" K"));
       break;
     case 2:
       lcd.setCursor(0, 0);
       lcd.print ("Pressure");
       lcd.setCursor(0, 1);
-      lcd.print(P);
+      lcd.print(String(P,2)+String(" atm"));
       break;
+    case 3:
+      lcd.setCursor(0, 0);
+      lcd.print ("Ti");
+      lcd.setCursor(0, 1);
+      lcd.print(String(ti*1000,4)+String(" ms"));
+      break;  
     default:
       break;
   }
@@ -140,7 +152,8 @@ float A_calc (float P, float V, float T)
   return result;
 }
 
-void callback(void) {
+void refresh_LCD(void)
+{
   if (refresh_counter < display_refresh)
   {
     refresh_counter ++;
@@ -149,12 +162,49 @@ void callback(void) {
   { 
     display_print();
     refresh_counter = 0;
+  }  
+}
+
+void inj_control(void)
+{
+  int inj_A_peak = TRUE;
+  switch (inj_status){
+    case WAIT:
+      timer=micros()+(ti*1000000);
+      inj_status=SENSE;
+      digitalWrite(Inj_output,HIGH);
+      break;
+    case SENSE:    
+        if (inj_A_peak == TRUE)
+        {
+          digitalWrite(Inj_output,LOW);
+          inj_status=MAINTAIN; 
+          STATUS = LOW;  
+        }
+        break;
+    case MAINTAIN:
+      if (micros() <= timer)
+      {
+        inj_maintain = TRUE;
+      }
+      else
+      {
+        inj_status=WAIT;
+      }
+      break;    
+    default:
+      break;
   }
 }
 
-void out_serial(float value)
-{
-  Serial.print(value);
+void callback(void) {
+  refresh_LCD();
+  if ( inj_maintain == TRUE )
+  {
+    STATUS=!STATUS;
+    digitalWrite(Inj_output,STATUS);
+  }
+  
 }
 
 void read_button(int reading)
@@ -191,10 +241,11 @@ float getVEfromLookupTable (unsigned int motorRPM, float P)
 void setup() 
 {
   pinMode(buttonPin, INPUT);                                   // Initialize the pushbutton pin as an input
+  pinMode(Inj_output, OUTPUT);
   pinMode(ledPin, OUTPUT);
   Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
   lcd.begin(16, 2);                                            // Set up the LCD's number of columns and rows
-  Timer1.initialize(15);                                       // initialize timer1, 15us
+  Timer1.initialize(10);                                       // initialize timer1, 10us
   Timer1.attachInterrupt(callback);                            // attaches callback() as a timer overflow interrupt
   lcd.print ("Initialized");
   Serial.println("Initializing...");
@@ -202,8 +253,9 @@ void setup()
 
 // Main Routine
 void loop()
-{
+{   
   read_button(digitalRead(buttonPin));
+  inj_control();
 
   float temp_counts = analogRead(analog_temp);                  // Read TEMP counts from A0 pin
   temp = (float) (((temp_counts/1023)*TEMP_RANGE)+TEMP_MIN);     // Converts ADC counts into temperature [ºK]
@@ -216,8 +268,8 @@ void loop()
   //Serial.println(String("Air/Fuel Mixture: ")+String(A,10));
   float F = A / AFR;                                             // Fuel Per Cilinder
   //Serial.println(String("Fuel Per Cilinder: ")+String(F,10));
-  float ti = F / Rf;                                             //Injector Duty Time
-  Serial.println(ti,4);
-  //Serial.println(String("Injector Duty Time: ")+String(ti,10));     
+  ti = F / Rf;                                                   //Injector Duty Time
+  //Serial.println(String("Injector Duty Time: ")+String(ti,10));   
+  
 }
 
