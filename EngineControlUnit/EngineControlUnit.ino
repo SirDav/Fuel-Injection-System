@@ -67,9 +67,10 @@ float VE_Matrix[9][18] = {
 // Setup Variables
 const int rs = 7, en = 8, d4 = 9, d5 = 10, d6 = 11, d7 = 12;    //LCD interface pinout
 int analog_temp = 0;                                            // A0 analog input for TEMP sensor
-const int buttonPin = 2;                                        // External button for menu
+const int buttonPin = 4;                                        // External button for menu
 const int ledPin =  13;                                         // the number of the LED pin
 const int Inj_output = 3;                                             // Output pin for Injector
+const int rpmPin = 2;
 
 // Global Variables
 int lastButtonState = LOW;
@@ -86,14 +87,15 @@ float P = 1.0;                                                  // Default Atmos
 float R = 0.000082057;                                          // Default Gasoline Molecular Weight [(m^3*atm)/(°K*mol)
 float V = 1.00;                                                 // Default Air Mass Volume [m^3]
 float MAF = 0;
-int A = 0;
-int RPM = 1000;                                               
+float A = 0;
+int RPM_value=1000;
+double RPM_frame = millis()+1000;
+int RPM_count = 0;                                               
 float Rf = 2.5;                                                   // Injector rate [g/s]
 float AFR = 14.7;                                               // Stoichiometric air-fuel ratio. 
 float engineDispl = 2.0;                                        // Default engine displacement [l]
 float ti = 0;
 float timer = 0;
-unsigned int motorRPM = 0;                                      // Default motor speed [RPM]
 int inj_status=WAIT;
 int STATUS = 0;
 int inj_maintain = FALSE;
@@ -130,9 +132,9 @@ void display_print()
       break;
     case 2:
       lcd.setCursor(0, 0);
-      lcd.print ("Pressure");
+      lcd.print ("RPM");
       lcd.setCursor(0, 1);
-      lcd.print(String(P,2)+String(" atm"));
+      lcd.print(String(RPM_value)+String(" revs/min"));
       break;
     case 3:
       lcd.setCursor(0, 0);
@@ -143,7 +145,6 @@ void display_print()
     default:
       break;
   }
-  
 }
 float A_calc (float P, float V, float T)
 {
@@ -243,6 +244,8 @@ void setup()
   pinMode(buttonPin, INPUT);                                   // Initialize the pushbutton pin as an input
   pinMode(Inj_output, OUTPUT);
   pinMode(ledPin, OUTPUT);
+  pinMode(rpmPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(rpmPin), pulse, RISING);
   Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
   lcd.begin(16, 2);                                            // Set up the LCD's number of columns and rows
   Timer1.initialize(10);                                       // initialize timer1, 10us
@@ -251,25 +254,46 @@ void setup()
   Serial.println("Initializing...");
 }
 
+void pulse (void)
+{
+  RPM_count++;
+}
+
 // Main Routine
 void loop()
 {   
   read_button(digitalRead(buttonPin));
   inj_control();
 
+  if (millis() - RPM_frame >=0)
+  {
+    RPM_value = RPM_count*60 ;
+    RPM_frame = millis()+1000;
+    RPM_count = 0;
+  }
+  
+  
   float temp_counts = analogRead(analog_temp);                  // Read TEMP counts from A0 pin
   temp = (float) (((temp_counts/1023)*TEMP_RANGE)+TEMP_MIN);     // Converts ADC counts into temperature [ºK]
 
-  float volEfficiency = getVEfromLookupTable(motorRPM, P);      // Gets VE depending on motor speed and pressure
+  float volEfficiency = getVEfromLookupTable(RPM_value, P);      // Gets VE depending on motor speed and pressure
   V = engineDispl*volEfficiency/1000;
   
   MAF=(float)A_calc(P, V, temp);                                // Calculate Air/Fuel Mixture (n), temp is converted to C based on ADC counts
-  float A = (MAF*28.966)/((RPM/60)*(N/2));                      // Air/Fuel Mixture
+  
+  if (RPM_value < 250)
+  {    
+    A = 0.0;
+  }
+  else
+  {
+    A = (MAF*28.966)/((RPM_value/60)*(N/2));                      // Air/Fuel Mixture  
+  }
   //Serial.println(String("Air/Fuel Mixture: ")+String(A,10));
   float F = A / AFR;                                             // Fuel Per Cilinder
   //Serial.println(String("Fuel Per Cilinder: ")+String(F,10));
   ti = F / Rf;                                                   //Injector Duty Time
   //Serial.println(String("Injector Duty Time: ")+String(ti,10));   
-  
+  Serial.println(RPM_value);
 }
 
