@@ -99,6 +99,8 @@ float timer = 0;
 int inj_status=WAIT;
 int STATUS = 0;
 int inj_maintain = FALSE;
+int rshunt_hc = 6;
+int ti_hc = 0;
 
 // Initialization
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                      // LCD setup
@@ -168,44 +170,37 @@ void refresh_LCD(void)
 
 void inj_control(void)
 {
-  int inj_A_peak = TRUE;
   switch (inj_status){
     case WAIT:
-      timer=micros()+(ti*1000000);
       inj_status=SENSE;
       digitalWrite(Inj_output,HIGH);
+      rshunt_hc = 9;  
+      ti_hc= ti*50000;  // test purpose
       break;
-    case SENSE:    
-        if (inj_A_peak == TRUE)
-        {
+    case SENSE:
+      if (rshunt_hc == 0) 
+      {      
           digitalWrite(Inj_output,LOW);
           inj_status=MAINTAIN; 
-          STATUS = LOW;  
-        }
+          STATUS = LOW;     
+      }
         break;
     case MAINTAIN:
-      if (micros() <= timer)
-      {
-        inj_maintain = TRUE;
-      }
-      else
-      {
-        inj_status=WAIT;
-      }
-      break;    
-    default:
+      digitalWrite(Inj_output,STATUS);
+      STATUS=!STATUS;    
+      if (ti_hc == 0) 
+      {      
+        inj_status=WAIT; 
+      }  
       break;
   }
 }
 
 void callback(void) {
   refresh_LCD();
-  if ( inj_maintain == TRUE )
-  {
-    STATUS=!STATUS;
-    digitalWrite(Inj_output,STATUS);
-  }
-  
+  rshunt_hc--;
+  ti_hc--;
+  inj_control();
 }
 
 void read_button(int reading)
@@ -248,7 +243,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(rpmPin), pulse, RISING);
   Serial.begin(9600);                                          // Initialize Serial Port - 9600 baudrate.
   lcd.begin(16, 2);                                            // Set up the LCD's number of columns and rows
-  Timer1.initialize(10);                                       // initialize timer1, 10us
+  Timer1.initialize(20);                                       // initialize timer1, 10us
   Timer1.attachInterrupt(callback);                            // attaches callback() as a timer overflow interrupt
   lcd.print ("Initialized");
   Serial.println("Initializing...");
@@ -263,15 +258,14 @@ void pulse (void)
 void loop()
 {   
   read_button(digitalRead(buttonPin));
-  inj_control();
-
+ 
   if (millis() - RPM_frame >=0)
   {
     RPM_value = RPM_count*60 ;
     RPM_frame = millis()+1000;
     RPM_count = 0;
   }
-  
+
   
   float temp_counts = analogRead(analog_temp);                  // Read TEMP counts from A0 pin
   temp = (float) (((temp_counts/1023)*TEMP_RANGE)+TEMP_MIN);     // Converts ADC counts into temperature [ºK]
@@ -289,11 +283,8 @@ void loop()
   {
     A = (MAF*28.966)/((RPM_value/60)*(N/2));                      // Air/Fuel Mixture  
   }
-  //Serial.println(String("Air/Fuel Mixture: ")+String(A,10));
   float F = A / AFR;                                             // Fuel Per Cilinder
-  //Serial.println(String("Fuel Per Cilinder: ")+String(F,10));
   ti = F / Rf;                                                   //Injector Duty Time
-  //Serial.println(String("Injector Duty Time: ")+String(ti,10));   
-  Serial.println(RPM_value);
+  Serial.println("busy"); 
 }
 
